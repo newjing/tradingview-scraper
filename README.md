@@ -1,12 +1,40 @@
 # TradingView Scraper
 [![Python 3.8](https://img.shields.io/badge/python-3.8-blue.svg)](https://www.python.org/downloads/release/python-380/)
-[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![MIT License](https://img.shields.io/github/license/mnwato/tradingview-scraper.svg?color=brightgreen)](https://opensource.org/licenses/MIT)
 
 
-This is a Python library for scraping ideas and indicators from [TradingView.com](https://www.tradingview.com). The goal is to develop this package to scrape anything on [TradingView.com](https://www.tradingview.com) with real-time responses.  
+This is a Python library for scraping ideas and indicators from [TradingView.com](https://www.tradingview.com). The goal is to develop this package to scrape anything on [TradingView.com](https://www.tradingview.com) with real-time responses.
 **Thanks to contributors!**
 
+## EUA 历史数据特别容易手工获取
+- Dec25   到  https://www.barchart.com/futures/quotes/CKZ25/interactive-chart
+- Dec26   到  https://www.barchart.com/futures/quotes/CKZ26/interactive-chart
+- 打开Devtools network中找到  queryminutes.ashx 开头的， 在response里直接复制就好
+
+- 注意展期处理，行业做法是：只用主力合约数据一致到到期，并且【向后复权】：
+  - 2025年的全年所有价格 + （2025.12.15那天  Dec26 open - dec25 open）
+  - 道理就是像拼接水管，只把到期最后一天的价差统一加上
+  - 所以：
+    - Dec25的价格，统一加上 （85.95 - 83.67 = 2.28）
+    - Dec24的价格，在25的价差  2.28 之上再加上 （66.35 - 64.31 = 2.04）,所以是统一加  4.32
+
+## 关于时区 & 夏令时 冬令时
+    -冬令时：08:00 CET = 07:00 UTC
+    -夏令时：08:00 CEST = 06:00 UTC
+
+- 总结：存 UTC，读 Local。这能帮你省去无穷无尽的 if-else 判断。
+
+- A. 数据存储层 (Data Storage)：永远使用 UTC
+原则：在 CSV 或数据库中，绝对不要使用当地时间，只存 UTC。
+
+理由：夏令时切换回冬令时的那一天（通常是10月最后一个周日），时间会倒流一小时（例如从 03:00 变回 02:00）。如果你存当地时间，数据库里会出现两个“02:00”，你会分不清哪个是先发生的，导致严重的数据主键冲突。
+
+做法：存 2025-10-27 06:00:00+00:00 (UTC)。
+
+- B. 策略分析层 (Data Analysis)：必须转换为“交易所当地时间”
+原则：在把数据加载到 Pandas 或你的回测引擎后，第一件事就是转换时区。
+做法：将 UTC 时间转换为 Europe/Berlin (或 Europe/London，取决于具体交易所的主流时区)。
+对齐效果：转换后，无论冬天还是夏天，你的 K 线图上，开盘时间永远都是 08:00。这就在逻辑上实现了“时间对齐”。
+ 08:00–18:00 CET
 
 ## To-Do List
 - Export
@@ -27,7 +55,7 @@ This is a Python library for scraping ideas and indicators from [TradingView.com
   - [x] [Fundamental-Graphs](https://www.tradingview.com/fundamental-graphs/?selected-metric=STD%3BFund_total_revenue_fq&symbols=NASDAQ%3AAAPL%2CNASDAQ%3AGOOGL&metrics=STD%3BFund_total_revenue_fq/)
   - [x] Get 'OHLC', 'Indicators' using TradingView WebSocket
   - [x] Export historical OHLC candle and Indicator values
-  
+
   Additional suggestions welcome!
 
 ### To be aware of the latest changes, go to the [end of this page](https://github.com/mnwato/tradingview-scraper#changes).
@@ -58,7 +86,7 @@ This is a Python library for scraping ideas and indicators from [TradingView.com
   - Scrape a Specific Range of Pages
 
 - **Indicator Extraction**
-  - Extract values for indicators like `RSI`, `Stoch.K`, etc. 
+  - Extract values for indicators like `RSI`, `Stoch.K`, etc.
   - [Full list of indicators](https://github.com/mnwato/tradingview-scraper/blob/dev/tradingview_scraper/indicators.txt)
 
 - **Real-Time data Extraction**
@@ -145,6 +173,41 @@ To get started with the TradingView Scraper library, follow these simple steps:
    ```sh
    pip install --upgrade --no-cache tradingview-scraper
    ```
+
+## Historical OHLCV CLI
+
+### File Structure
+- `fetch.py`: single entry point to fetch historical OHLCV data by timeframe
+- `clean.py`: single entry point to clean OHLCV JSON to CSV by timeframe
+- `scripts/ohlcv_fetch_utils.py`: shared helpers for fetch logic
+- `scripts/clean_ohlcv_data.py`: shared helpers for cleaning logic
+- `data/raw_ohlcv/`: JSON output directory
+- `data/clean_ohlcv/`: CSV output directory
+
+### Default Parameters
+- `symbol`: `ICEENDEX:ECFZ2026`
+- `start-date`: `2024-01-02`
+- `timeframe`: required (`1D`, `1h`, `5m`)
+
+### Fetch Examples
+```bash
+python fetch.py --timeframe 1D
+python fetch.py --timeframe 1h
+python fetch.py --timeframe 5m
+```
+
+### Clean Examples
+```bash
+python clean.py --timeframe 1D
+python clean.py --timeframe 1h
+python clean.py --timeframe 5m
+```
+
+### Optional Arguments
+```bash
+python fetch.py --timeframe 5m --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02 --chunk-size 5000 --timeout 120 --max-packets 800
+python clean.py --timeframe 1D --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02 --end-date 2025-01-01
+```
 
 Here’s a revised version of the Examples section, focusing on clarity, ease of understanding, and providing essential information about default values:
 
@@ -435,6 +498,103 @@ for packet in data_generator:
 ```text
 {'m': 'qsd', 'p': ['qs_folpuhzgowtu', {'n': 'BINANCE:BTCUSDT', 's': 'ok', 'v': {'volume': 6817.46425, 'lp_time': 1734082521, 'lp': 99957.9, 'chp': -0.05, 'ch': -46.39}}]}
 ```
+
+### 6.1. Historical OHLCV Data Extraction
+
+The `OHLCVExtractor` class fetches historical OHLCV data on demand without keeping a
+persistent WebSocket connection open.
+
+#### Features
+- On-demand historical bars
+- Multiple timeframes: 1m, 5m, 15m, 30m, 1h, 2h, 4h, 1D, 1W, 1M
+- Batch processing for multiple symbols
+- Rich metadata (timestamps and percentage changes)
+- Optional JSON file export
+
+#### Quick Start - Single Symbol
+```python
+from tradingview_scraper.symbols.stream import get_ohlcv_json
+
+data = get_ohlcv_json(
+    symbol="BINANCE:BTCUSDT",
+    timeframe="1D",
+    bars_count=10,
+    save_to_file=True,
+    debug=False
+)
+
+if data["success"]:
+    latest_bar = data["data"][-1]
+    print(f"Retrieved {data['bars_received']} bars")
+    print(f"Latest close: {latest_bar['close']}")
+else:
+    print(f"Error: {data['metadata']['error']}")
+```
+
+#### Multiple Symbols
+```python
+from tradingview_scraper.symbols.stream import get_multiple_ohlcv_json
+
+symbols = ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT", "BINANCE:ADAUSDT"]
+results = get_multiple_ohlcv_json(symbols=symbols, timeframe="1h", bars_count=5)
+
+print(f"Successful: {results['successful_symbols']}/{results['total_symbols']}")
+```
+
+#### Advanced Usage - Class Instance
+```python
+from tradingview_scraper.symbols.stream import OHLCVExtractor
+
+extractor = OHLCVExtractor(debug_mode=True)
+result = extractor.get_ohlcv_data(
+    symbol="BINANCE:ETHUSDT",
+    timeframe="15m",
+    bars_count=20,
+    timeout=45
+)
+```
+
+#### Output Format
+```json
+{
+  "success": true,
+  "symbol": "BINANCE:BTCUSDT",
+  "timeframe": "1D",
+  "bars_requested": 10,
+  "bars_received": 10,
+  "data": [
+    {
+      "timestamp": 1701388800,
+      "datetime": "2023-12-01T00:00:00",
+      "date": "2023-12-01",
+      "time": "00:00:00",
+      "open": 37500.5,
+      "high": 38200.75,
+      "low": 37300.25,
+      "close": 38000.0,
+      "volume": 15234.5678,
+      "change_percent": 1.3333
+    }
+  ],
+  "metadata": {
+    "timestamp": "2023-12-01T12:00:00",
+    "processing_time_seconds": 2.5,
+    "error": null
+  }
+}
+```
+
+#### Error Handling
+```python
+result = get_ohlcv_json("BINANCE:BTCUSDT", timeframe="1D", bars_count=5)
+
+if not result["success"]:
+    error = result["metadata"]["error"]
+    print(f"Error: {error}")
+```
+
+#### Complete Example
+See `jingscraper/examples/ohlcv_extractor_example.py`.
 
 ### 7. Getting Calendar events
 
@@ -1672,13 +1832,13 @@ All symbols must include exchange prefix:
 - Release `0.4.0`:
   Update exchange list
   Add real-time price streaming
-- Release `0.3.2`:  
+- Release `0.3.2`:
   Support timeframe to get Indicators
-- Release `0.3.0`:   
+- Release `0.3.0`:
   Add news scraper
-- Release `0.2.9`:   
+- Release `0.2.9`:
   Refactor for new TradingView structure
-- Release `0.1.0`:  
+- Release `0.1.0`:
   The name of `ClassA` changed to `Ideas`
 
 ## License:
