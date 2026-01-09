@@ -36,6 +36,47 @@ This is a Python library for scraping ideas and indicators from [TradingView.com
 对齐效果：转换后，无论冬天还是夏天，你的 K 线图上，开盘时间永远都是 08:00。这就在逻辑上实现了“时间对齐”。
  08:00–18:00 CET
 
+## 新增功能与用法（本地）
+以下为本仓库新增的本地脚本与用法（中文说明）：
+
+- 本地 OHLCV 抓取脚本（UTC）
+  - 路径：`jingscraper/fetch.py`、`jingscraper/fetch_5m.py`
+  - 示例：
+    ```bash
+    python3 jingscraper/fetch.py --timeframe 1D --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    python3 jingscraper/fetch.py --timeframe 1h --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    python3 jingscraper/fetch.py --timeframe 5m --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    ```
+
+- 本地清洗脚本（UTC）
+  - 路径：`jingscraper/clean.py`、`jingscraper/clean_ohlcv_data.py`
+  - 示例：
+    ```bash
+    python3 jingscraper/clean.py --timeframe 1D --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    python3 jingscraper/clean.py --timeframe 1h --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    python3 jingscraper/clean.py --timeframe 5m --symbol ICEENDEX:ECFZ2026 --start-date 2024-01-02
+    ```
+
+- 本地实时补齐与合并（UTC）
+  - 路径：`realtime.py`
+  - 功能：拉取最近 N 天的 1D/1h/5m 数据，清洗后合并到 `data/clean_ohlcv`，若 date/time 重复则用新数据覆盖（新数据非空时）。
+  - 示例：
+    ```bash
+    python3 realtime.py --symbol ICEENDEX:ECFZ2026 --days 5
+    ```
+
+- UTC 输出说明
+  - `jingscraper/ohlcv_extractor.py` 生成的 `datetime/date/time` 字段均为 UTC。
+  - 归档 CSV 默认落在 `data/clean_ohlcv/`（如 `1d_utc.csv`、`1H_utc.csv`、`5m_utc.csv`）。
+
+- Python 调用示例
+  ```python
+  from jingscraper import OHLCVExtractor, get_ohlcv_json
+
+  data = get_ohlcv_json("ICEENDEX:ECFZ2026", timeframe="1h", bars_count=5)
+  extractor = OHLCVExtractor(debug_mode=False)
+  ```
+
 ## To-Do List
 - Export
   - [x] Export as a `CSV` file
