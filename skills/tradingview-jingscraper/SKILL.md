@@ -18,7 +18,7 @@ Use this skill when the user wants to fetch/clean/merge TradingView OHLCV data i
 - `jingscraper/ohlcv_extractor.py`: TradingView OHLCV fetcher. Uses UTC for datetime/date/time fields.
 - `jingscraper/fetch.py`: fetch JSON for `1D`, `1h`, `5m`.
 - `jingscraper/clean.py` and `jingscraper/clean_ohlcv_data.py`: clean JSON to CSV.
-- `realtime.py`: fetch recent N days, clean, then merge into `data/clean_ohlcv` with de-dupe by date/time and overwrite if new values are non-empty.
+- `realtime.py`: fetch recent N days, clean in-memory, then merge into `data/clean_ohlcv` with de-dupe by date/time and overwrite if new values are non-empty. No temp JSON/CSV files are written.
 
 ## Workflow
 1) Fetch recent data
@@ -49,6 +49,8 @@ Use this skill when the user wants to fetch/clean/merge TradingView OHLCV data i
 ## Notes
 - UTC output is required; if timestamps appear in local time, check `jingscraper/ohlcv_extractor.py` for `datetime.now(timezone.utc)` and `datetime.fromtimestamp(..., tz=timezone.utc)` usage.
 - Default target CSVs: `data/clean_ohlcv/1d_utc.csv`, `data/clean_ohlcv/1H_utc.csv`, `data/clean_ohlcv/5m_utc.csv`.
+- 清洗输出包含 `datetime` 列（若不存在则补齐），`time` 统一为 `HH:MM:00`。
+- 1D 的 `datetime/time` 取当天 1H 第一条数据时间（UTC）以便对齐。
 
 ## 数据合并规则细节
 - 合并键：按 `date` 或 `date+time` 去重。

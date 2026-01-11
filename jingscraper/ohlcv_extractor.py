@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Any
 
 from websocket import create_connection, WebSocketTimeoutException, WebSocketConnectionClosedException
 
-from tradingview_scraper.symbols.stream.price import RealTimeData
+from .price import RealTimeData
 
 logger = logging.getLogger(__name__)
 

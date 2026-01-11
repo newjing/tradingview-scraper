@@ -11,7 +11,13 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from jingscraper.clean_ohlcv_data import _filter_bars, _load_json, _parse_date, _write_csv
+from jingscraper.clean_ohlcv_data import (
+    _build_open_time_map,
+    _filter_bars,
+    _load_json,
+    _parse_date,
+    _write_csv,
+)
 
 
 def main() -> int:
@@ -60,7 +66,15 @@ def main() -> int:
 
     payload = _load_json(json_path)
     bars = payload.get("data") or []
-    cleaned = _filter_bars(bars, start_dt, end_dt)
+    open_time_map = None
+    if args.timeframe == "1D":
+        one_hour_path = Path(args.input_dir) / f"{symbol_slug}_1h.json"
+        if one_hour_path.exists():
+            one_hour_payload = _load_json(one_hour_path)
+            one_hour_bars = one_hour_payload.get("data") or []
+            open_time_map = _build_open_time_map(one_hour_bars)
+
+    cleaned = _filter_bars(bars, start_dt, end_dt, open_time_map=open_time_map)
 
     csv_path = Path(args.output_dir) / f"{symbol_slug}_{args.timeframe}.csv"
     _write_csv(csv_path, cleaned)

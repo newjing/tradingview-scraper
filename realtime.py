@@ -3,16 +3,13 @@
 
 import argparse
 import csv
-import os
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any, Optional
 
-
-def _run(cmd: List[str]) -> None:
-    subprocess.run(cmd, check=True)
+from jingscraper.ohlcv_extractor import OHLCVExtractor, get_ohlcv_json
+from jingscraper.ohlcv_fetch_utils import bars_needed, parse_date
+from jingscraper.clean_ohlcv_data import _build_open_time_map, _filter_bars
 
 
 def _get_start_date(days: int) -> str:
@@ -106,6 +103,47 @@ def _resolve_target_path(target_dir: Path, timeframe: str, symbol_slug: str) -> 
     return target_dir / f"{symbol_slug}_{timeframe}_utc.csv"
 
 
+def _fetch_bars(
+    symbol: str,
+    timeframe: str,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> Dict[str, Any]:
+    if timeframe in ("1D", "1h"):
+        bars_count = bars_needed(start_dt, end_dt, timeframe)
+        return get_ohlcv_json(
+            symbol=symbol,
+            timeframe=timeframe,
+            bars_count=bars_count,
+            save_to_file=False,
+            debug=False,
+        )
+    extractor = OHLCVExtractor(debug_mode=False)
+    return extractor.get_ohlcv_history(
+        symbol=symbol,
+        timeframe="5m",
+        start_ts=int(start_dt.timestamp()),
+        end_ts=int(end_dt.timestamp()),
+        chunk_size=5000,
+        timeout=120,
+        max_packets=800,
+        idle_timeout=60,
+    )
+
+
+def _clean_rows(
+    bars: List[Dict[str, Any]],
+    start_dt: datetime,
+    end_dt: datetime,
+    open_time_map: Optional[Dict[str, str]] = None,
+) -> List[Dict[str, str]]:
+    cleaned = _filter_bars(bars, start_dt, end_dt, open_time_map=open_time_map)
+    normalized: List[Dict[str, str]] = []
+    for row in cleaned:
+        normalized.append({key: "" if value is None else str(value) for key, value in row.items()})
+    return normalized
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Fetch and merge the latest TradingView OHLCV data."
@@ -122,16 +160,6 @@ def main() -> int:
         help="How many days back to fetch (UTC).",
     )
     parser.add_argument(
-        "--raw-dir",
-        default="data/raw_ohlcv/realtime",
-        help="Temp directory for fetched JSON data.",
-    )
-    parser.add_argument(
-        "--clean-dir",
-        default="data/clean_ohlcv/realtime",
-        help="Temp directory for cleaned CSV data.",
-    )
-    parser.add_argument(
         "--target-dir",
         default="data/clean_ohlcv",
         help="Directory to merge results into.",
@@ -139,67 +167,42 @@ def main() -> int:
     args = parser.parse_args()
 
     start_date = _get_start_date(args.days)
+    start_dt = parse_date(start_date)
+    end_dt = datetime.now(timezone.utc)
     symbol_slug = args.symbol.replace(":", "_")
-    raw_dir = Path(args.raw_dir)
-    clean_dir = Path(args.clean_dir)
     target_dir = Path(args.target_dir)
 
-    fetch_script = Path(__file__).parent / "jingscraper" / "fetch.py"
-    clean_script = Path(__file__).parent / "jingscraper" / "clean.py"
-
-    timeframes = ["1D", "1h", "5m"]
+    timeframes = ["1h", "1D", "5m"]
+    open_time_map = None
     for timeframe in timeframes:
-        _run(
-            [
-                sys.executable,
-                str(fetch_script),
-                "--timeframe",
-                timeframe,
-                "--symbol",
-                args.symbol,
-                "--start-date",
-                start_date,
-                "--output-dir",
-                str(raw_dir),
-            ]
-        )
-        _run(
-            [
-                sys.executable,
-                str(clean_script),
-                "--timeframe",
-                timeframe,
-                "--symbol",
-                args.symbol,
-                "--start-date",
-                start_date,
-                "--input-dir",
-                str(raw_dir),
-                "--output-dir",
-                str(clean_dir),
-            ]
-        )
-
-        new_csv = clean_dir / f"{symbol_slug}_{timeframe}.csv"
-        if not new_csv.exists():
-            print(f"[{timeframe}] no cleaned data found at {new_csv}")
+        result = _fetch_bars(args.symbol, timeframe, start_dt, end_dt)
+        if not result.get("success"):
+            error = (result.get("metadata") or {}).get("error")
+            print(f"[{timeframe}] fetch failed: {error}")
             continue
 
-        new_data = _read_csv(new_csv)
-        if not new_data["rows"]:
+        bars = result.get("data") or []
+        if timeframe == "1h":
+            open_time_map = _build_open_time_map(bars)
+        if timeframe == "1D":
+            new_rows = _clean_rows(bars, start_dt, end_dt, open_time_map=open_time_map)
+        else:
+            new_rows = _clean_rows(bars, start_dt, end_dt)
+        if not new_rows:
             print(f"[{timeframe}] no new rows to merge")
             continue
 
+        new_fields = list(new_rows[0].keys())
         target_csv = _resolve_target_path(target_dir, timeframe, symbol_slug)
         existing = _read_csv(target_csv)
         merged = _merge_rows(
             existing["fields"],
             existing["rows"],
-            new_data["fields"],
-            new_data["rows"],
+            new_fields,
+            new_rows,
         )
         _write_csv(target_csv, merged["fields"], merged["rows"])
-        print(f"[{timeframe}] merged {len(new_data['rows'])} rows into {target_csv}")
+        print(f"[{timeframe}] merged {len(new_rows)} rows into {target_csv}")
 
     return 0
 

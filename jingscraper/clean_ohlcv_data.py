@@ -8,10 +8,10 @@ import csv
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, Dict, Any, List
+from typing import Iterable, Dict, Any, List, Optional
 
 
-FIELDS = ["date", "time", "open", "high", "low", "close", "volume"]
+FIELDS = ["datetime", "date", "time", "open", "high", "low", "close", "volume"]
 
 
 def _parse_date(value: str) -> datetime:
@@ -23,29 +23,55 @@ def _load_json(path: Path) -> Dict[str, Any]:
         return json.load(handle)
 
 
-def _normalize_row(bar: Dict[str, Any]) -> Dict[str, Any]:
-    if "date" in bar and "time" in bar:
-        return {field: bar.get(field) for field in FIELDS}
+def _normalize_row(
+    bar: Dict[str, Any],
+    open_time_map: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    def normalize_time(value: Optional[str]) -> str:
+        if not value:
+            return ""
+        parts = value.split(":")
+        if len(parts) == 2:
+            return f"{parts[0]}:{parts[1]}:00"
+        if len(parts) == 3:
+            return value
+        return value
 
-    timestamp = bar.get("timestamp")
-    if timestamp is None:
-        return {field: bar.get(field) for field in FIELDS}
+    date_value = bar.get("date")
+    time_value = normalize_time(bar.get("time"))
+    if date_value and time_value:
+        pass
+    else:
+        timestamp = bar.get("timestamp")
+        if timestamp is None:
+            return {field: bar.get(field) for field in FIELDS}
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        date_value = dt.strftime("%Y-%m-%d")
+        time_value = dt.strftime("%H:%M:%S")
 
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    normalized = {
-        "date": dt.strftime("%Y-%m-%d"),
-        "time": dt.strftime("%H:%M:%S"),
+    if open_time_map and date_value in open_time_map:
+        time_value = normalize_time(open_time_map[date_value])
+
+    if not time_value:
+        time_value = "00:00:00"
+
+    return {
+        "datetime": f"{date_value} {time_value}",
+        "date": date_value,
+        "time": time_value,
         "open": bar.get("open"),
         "high": bar.get("high"),
         "low": bar.get("low"),
         "close": bar.get("close"),
         "volume": bar.get("volume"),
     }
-    return normalized
 
 
 def _filter_bars(
-    bars: Iterable[Dict[str, Any]], start_dt: datetime, end_dt: datetime
+    bars: Iterable[Dict[str, Any]],
+    start_dt: datetime,
+    end_dt: datetime,
+    open_time_map: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     cleaned: List[Dict[str, Any]] = []
     for bar in bars:
@@ -54,8 +80,23 @@ def _filter_bars(
             continue
         dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
         if start_dt <= dt <= end_dt:
-            cleaned.append(_normalize_row(bar))
+            cleaned.append(_normalize_row(bar, open_time_map=open_time_map))
     return cleaned
+
+
+def _build_open_time_map(bars: Iterable[Dict[str, Any]]) -> Dict[str, str]:
+    open_time_map: Dict[str, str] = {}
+    open_dt_map: Dict[str, datetime] = {}
+    for bar in bars:
+        timestamp = bar.get("timestamp")
+        if timestamp is None:
+            continue
+        dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+        date_value = dt.strftime("%Y-%m-%d")
+        if date_value not in open_dt_map or dt < open_dt_map[date_value]:
+            open_dt_map[date_value] = dt
+            open_time_map[date_value] = dt.strftime("%H:%M:%S")
+    return open_time_map
 
 
 def _write_csv(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
