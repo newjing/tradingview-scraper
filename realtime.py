@@ -18,6 +18,16 @@ def _get_start_date(days: int) -> str:
     return start_dt.strftime("%Y-%m-%d")
 
 
+def _get_start_date_trading_days(trading_days: int) -> str:
+    current = datetime.now(timezone.utc).date()
+    remaining = trading_days - 1
+    while remaining > 0:
+        current -= timedelta(days=1)
+        if current.weekday() < 5:
+            remaining -= 1
+    return current.strftime("%Y-%m-%d")
+
+
 def _read_csv(path: Path) -> Dict[str, object]:
     if not path.exists():
         return {"fields": [], "rows": []}
@@ -41,29 +51,94 @@ def _merge_rows(
     new_fields: List[str],
     new_rows: List[Dict[str, str]],
 ) -> Dict[str, object]:
-    if not existing_fields:
-        return {"fields": new_fields, "rows": new_rows}
-
-    existing_key_map = {}
-    merged_rows = existing_rows[:]
-
-    field_lowers = [f.lower() for f in existing_fields]
-    has_time = "time" in field_lowers
-
     def build_key(row: Dict[str, str]) -> str:
         lower = {k.lower(): (v or "").strip() for k, v in row.items()}
+        datetime_value = lower.get("datetime", "")
+        if datetime_value:
+            return datetime_value
         date = lower.get("date", "")
-        time = lower.get("time", "") if has_time else ""
-        return f"{date} {time}".strip()
+        time = lower.get("time", "")
+        if date and time:
+            return f"{date} {time}".strip()
+        return date
 
-    for idx, row in enumerate(merged_rows):
+    def sort_key(row: Dict[str, str]):
         key = build_key(row)
-        if key:
-            existing_key_map[key] = idx
+        if not key:
+            return (1, "")
+        try:
+            return (0, datetime.fromisoformat(key))
+        except ValueError:
+            try:
+                return (0, datetime.fromisoformat(f"{key}:00"))
+            except ValueError:
+                return (0, key)
+
+    def merge_values(
+        base: Dict[str, str],
+        incoming: Dict[str, str],
+        fields: List[str],
+    ) -> Dict[str, str]:
+        merged = base.copy()
+        for field in fields:
+            value = (incoming.get(field) or "").strip()
+            if value:
+                merged[field] = value
+        return merged
+
+    if not existing_fields:
+        if not new_rows:
+            return {"fields": new_fields, "rows": []}
+        new_rows_deduped: List[Dict[str, str]] = []
+        new_key_map: Dict[str, int] = {}
+        for row in new_rows:
+            key = build_key(row)
+            if not key:
+                continue
+            if key in new_key_map:
+                idx = new_key_map[key]
+                new_rows_deduped[idx] = merge_values(
+                    new_rows_deduped[idx],
+                    row,
+                    new_fields,
+                )
+            else:
+                new_rows_deduped.append(row)
+                new_key_map[key] = len(new_rows_deduped) - 1
+        return {"fields": new_fields, "rows": sorted(new_rows_deduped, key=sort_key)}
+
+    existing_key_map: Dict[str, int] = {}
+    merged_rows: List[Dict[str, str]] = []
+    for row in existing_rows:
+        key = build_key(row)
+        if not key:
+            continue
+        if key in existing_key_map:
+            idx = existing_key_map[key]
+            merged_rows[idx] = merge_values(merged_rows[idx], row, existing_fields)
+        else:
+            merged_rows.append(row)
+            existing_key_map[key] = len(merged_rows) - 1
 
     new_field_map = {f.lower(): f for f in new_fields}
+    new_rows_deduped: List[Dict[str, str]] = []
+    new_key_map: Dict[str, int] = {}
+    for row in new_rows:
+        key = build_key(row)
+        if not key:
+            continue
+        if key in new_key_map:
+            idx = new_key_map[key]
+            new_rows_deduped[idx] = merge_values(
+                new_rows_deduped[idx],
+                row,
+                new_fields,
+            )
+        else:
+            new_rows_deduped.append(row)
+            new_key_map[key] = len(new_rows_deduped) - 1
 
-    for new_row in new_rows:
+    for new_row in new_rows_deduped:
         new_key = build_key(new_row)
         if not new_key:
             continue
@@ -88,7 +163,7 @@ def _merge_rows(
             merged_rows.append(appended)
             existing_key_map[new_key] = len(merged_rows) - 1
 
-    return {"fields": existing_fields, "rows": merged_rows}
+    return {"fields": existing_fields, "rows": sorted(merged_rows, key=sort_key)}
 
 
 def _resolve_target_path(target_dir: Path, timeframe: str, symbol_slug: str) -> Path:
@@ -160,13 +235,22 @@ def main() -> int:
         help="How many days back to fetch (UTC).",
     )
     parser.add_argument(
+        "--trading-days",
+        type=int,
+        default=0,
+        help="How many trading days back to fetch (UTC, weekdays only).",
+    )
+    parser.add_argument(
         "--target-dir",
         default="data/clean_ohlcv",
         help="Directory to merge results into.",
     )
     args = parser.parse_args()
 
-    start_date = _get_start_date(args.days)
+    if args.trading_days and args.trading_days > 0:
+        start_date = _get_start_date_trading_days(args.trading_days)
+    else:
+        start_date = _get_start_date(args.days)
     start_dt = parse_date(start_date)
     end_dt = datetime.now(timezone.utc)
     symbol_slug = args.symbol.replace(":", "_")
@@ -188,13 +272,27 @@ def main() -> int:
             new_rows = _clean_rows(bars, start_dt, end_dt, open_time_map=open_time_map)
         else:
             new_rows = _clean_rows(bars, start_dt, end_dt)
+        target_csv = _resolve_target_path(target_dir, timeframe, symbol_slug)
+        existing = _read_csv(target_csv)
         if not new_rows:
-            print(f"[{timeframe}] no new rows to merge")
+            if not existing["rows"]:
+                print(f"[{timeframe}] no new rows to merge")
+                continue
+            merged = _merge_rows(
+                existing["fields"],
+                existing["rows"],
+                existing["fields"],
+                [],
+            )
+            _write_csv(target_csv, merged["fields"], merged["rows"])
+            removed = len(existing["rows"]) - len(merged["rows"])
+            if removed > 0:
+                print(f"[{timeframe}] deduped {removed} rows in {target_csv}")
+            else:
+                print(f"[{timeframe}] no new rows to merge")
             continue
 
         new_fields = list(new_rows[0].keys())
-        target_csv = _resolve_target_path(target_dir, timeframe, symbol_slug)
-        existing = _read_csv(target_csv)
         merged = _merge_rows(
             existing["fields"],
             existing["rows"],

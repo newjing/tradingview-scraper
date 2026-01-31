@@ -39,12 +39,36 @@ class OHLCVExtractor(RealTimeData):
             "https://scanner.tradingview.com/symbol?symbol={exchange}%3A{symbol}&fields=market&no_404=false"
         )
         self.ws = None
+        self.connect_timeout = 10
+        self.connect_retries = 3
+        self.connect_backoff = 2
         self.timeout_seconds = 30
         self.debug_mode = debug_mode
 
         if not debug_mode:
             logging.getLogger("websocket").setLevel(logging.WARNING)
             logger.setLevel(logging.WARNING)
+
+    def _open_websocket(self) -> Optional[str]:
+        last_error: Optional[Exception] = None
+        for attempt in range(1, self.connect_retries + 1):
+            if self.ws is not None:
+                try:
+                    self.ws.close()
+                except Exception:
+                    pass
+            try:
+                self.ws = create_connection(
+                    self.ws_url,
+                    headers=self.request_header,
+                    timeout=self.connect_timeout,
+                )
+                return None
+            except Exception as exc:
+                last_error = exc
+                if attempt < self.connect_retries:
+                    time.sleep(self.connect_backoff * attempt)
+        return f"Error initializing WebSocket: {last_error}"
 
     def get_ohlcv_data(
         self,
@@ -78,15 +102,9 @@ class OHLCVExtractor(RealTimeData):
         }
 
         try:
-            try:
-                if self.ws is not None:
-                    try:
-                        self.ws.close()
-                    except Exception:
-                        pass
-                self.ws = create_connection(self.ws_url, headers=self.request_header)
-            except Exception as conn_error:
-                result["metadata"]["error"] = f"Error initializing WebSocket: {conn_error}"
+            conn_error = self._open_websocket()
+            if conn_error:
+                result["metadata"]["error"] = conn_error
                 return result
 
             quote_session = self.generate_session(prefix="qs_")
@@ -179,12 +197,10 @@ class OHLCVExtractor(RealTimeData):
         collected: Dict[int, Dict[str, Any]] = {}
 
         try:
-            if self.ws is not None:
-                try:
-                    self.ws.close()
-                except Exception:
-                    pass
-            self.ws = create_connection(self.ws_url, headers=self.request_header)
+            conn_error = self._open_websocket()
+            if conn_error:
+                result["metadata"]["error"] = conn_error
+                return result
             try:
                 self.ws.settimeout(5)
             except Exception:

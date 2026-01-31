@@ -5,7 +5,7 @@
 ## EUA 历史数据特别容易手工获取
 - Dec25   到  https://www.barchart.com/futures/quotes/CKZ25/interactive-chart
 - Dec26   到  https://www.barchart.com/futures/quotes/CKZ26/interactive-chart
-- 打开Devtools network中找到  queryminutes.ashx 开头的， 在response里直接复制就好
+- 打开Devtools network中找到  queryminutes.ashx 或(改了) queryeod.ashx 开头的， 在response里直接复制就好
 
 - 注意展期处理，行业做法是：只用主力合约数据一致到到期，并且【向后复权】：
   - 2025年的全年所有价格 + （2025.12.15那天  Dec26 open - dec25 open）
@@ -19,7 +19,7 @@
 
 ## 关于时区 & 夏令时 冬令时
     -冬令时：08:00 CET = 07:00 UTC
-    -夏令时：08:00 CEST = 06:00 UTC
+    -夏令时：08:00 CET = 06:00 UTC
 
 - 总结：存 UTC，读 Local。这能帮你省去无穷无尽的 if-else 判断。
 
