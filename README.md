@@ -2,7 +2,7 @@
 
 本仓库仅保留 TradingView OHLCV 的抓取、清洗与合并流程（UTC）。
 
-## EUA 历史数据特别容易手工获取
+## EUA 历史OI 数据特别容易手工获取
 - Dec25   到  https://www.barchart.com/futures/quotes/CKZ25/interactive-chart
 - Dec26   到  https://www.barchart.com/futures/quotes/CKZ26/interactive-chart
 - 打开Devtools network中找到  queryminutes.ashx 或(改了) queryeod.ashx 开头的， 在response里直接复制就好
@@ -11,7 +11,7 @@
   - 2025年的全年所有价格 + （2025.12.15那天  Dec26 open - dec25 open）
   - 道理就是像拼接水管，只把到期最后一天的价差统一加上
   - 所以：
-    - Dec25的价格，统一加上 （85.95 - 83.67 = 2.28）
+    - Dec25的价格，统一加上2.28 （85.95 - 83.67 = 2.28）
     - Dec24的价格，在25的价差  2.28 之上再加上 （66.35 - 64.31 = 2.04）,所以是统一加  4.32
 
 <mark>注意  tradingview抓不到 OI数据，需要到 barchart 上看了手工添加
@@ -62,9 +62,37 @@
   - 功能：拉取最近 N 天的 1D/1h/5m 数据，内存清洗后合并到 `data/clean_ohlcv`，不落地临时 JSON/CSV；若 date/time 重复则用新数据覆盖（新数据非空时）。
   - 对齐规则：1D 的 `datetime/time` 取当天 1H 的第一条时间（UTC）。
   - 时间格式：`time` 固定为 `HH:MM:00`，`datetime` 为 `YYYY-MM-DD HH:MM:00`。
+  - 合并/排重/排序规则（对应 `realtime.py` 逻辑）：
+    - 唯一键优先级：`datetime` > `date+time` > `date`；没有键的行会被丢弃。
+    - 新旧数据各自先按唯一键去重；同键内字段遵循“非空覆盖”。
+    - 合并时：以目标 CSV 字段顺序为准，字段名忽略大小写匹配；新数据非空覆盖旧值。
+    - 排序：按唯一键从小到大排序（优先 ISO 时间解析；解析失败则按字符串）。
   - 示例：
     ```bash
     python3 realtime.py --symbol ICEENDEX:ECFZ2026 --days 5
+    ```
+
+- 历史全量重建（分段主力 + 向后复权，UTC）
+  - 路径：`rebuild_history.py`（与 `realtime.py` 同级）
+  - 适用场景：从头重建完整历史，不走实时增量逻辑，不影响 `realtime.py`。
+  - 默认分段（UTC）：
+    - `2024-01-01 ~ 2024-12-17` 抓 `ICEENDEX:ECFZ2024`
+    - `2024-12-18 ~ 2025-12-15` 抓 `ICEENDEX:ECFZ2025`
+    - `2025-12-16 ~ 2026-12-08` 抓 `ICEENDEX:ECFZ2026`
+  - 默认向后复权事件：
+    - 在 `2024-12-18` 切换前的历史价格加 `2.04`
+    - 在 `2025-12-16` 切换前的历史价格加 `2.28`
+    - 因此 `2024-12-18` 之前累计加 `4.32`
+  - 质量约束（默认开启）：
+    - 清理空 OHLC 行；
+    - 除最后交易日外，强制 `1d=1`、`1h=10`、`5m=120`，不满足则整日剔除。
+  - 输出目录默认：`data/clean_ohlcv_rebuild/`
+  - 示例：
+    ```bash
+    python3 rebuild_history.py
+    ```
+    ```bash
+    python3 rebuild_history.py --target-dir data/clean_ohlcv_rebuild --five-min-timeout 300 --five-min-max-packets 2000
     ```
 
 - UTC 输出说明

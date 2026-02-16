@@ -42,19 +42,19 @@ def main() -> int:
     parser.add_argument(
         "--chunk-size",
         type=int,
-        default=5000,
+        default=1000,
         help="Bars per pagination request (5m only).",
     )
     parser.add_argument(
         "--timeout",
         type=int,
-        default=120,
+        default=300,
         help="Max total wait time in seconds (5m only).",
     )
     parser.add_argument(
         "--max-packets",
         type=int,
-        default=800,
+        default=2000,
         help="Safety cap for WebSocket packets (5m only).",
     )
     parser.add_argument(

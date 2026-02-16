@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+纯5m测试代码，非生产环境
 Standalone 5m OHLCV fetch with pagination.
 """
 
