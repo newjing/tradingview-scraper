@@ -132,6 +132,54 @@ def _filter_rows_by_dates(rows: List[Dict[str, str]], valid_dates: Set[str]) -> 
     return [row for row in rows if _extract_row_date(row) in valid_dates]
 
 
+def _find_field_name_ci(fields: List[str], candidates: List[str]) -> Optional[str]:
+    candidate_set = {name.lower() for name in candidates}
+    for field in fields:
+        if field.lower() in candidate_set:
+            return field
+    return None
+
+
+def _preserve_1d_oi(
+    existing_fields: List[str],
+    existing_rows: List[Dict[str, str]],
+    new_rows: List[Dict[str, str]],
+) -> List[Dict[str, str]]:
+    oi_aliases = ["oi", "open_interest", "openinterest"]
+    existing_oi_field = _find_field_name_ci(existing_fields, oi_aliases)
+    if not existing_oi_field or not new_rows:
+        return new_rows
+
+    existing_oi_by_date: Dict[str, str] = {}
+    for row in existing_rows:
+        row_date = _extract_row_date(row)
+        if not row_date:
+            continue
+        oi_value = (row.get(existing_oi_field) or "").strip()
+        if oi_value:
+            existing_oi_by_date[row_date] = oi_value
+
+    new_oi_field = existing_oi_field
+    first_row_fields = list(new_rows[0].keys())
+    new_oi_field_in_payload = _find_field_name_ci(first_row_fields, oi_aliases)
+    if new_oi_field_in_payload:
+        new_oi_field = new_oi_field_in_payload
+
+    preserved_rows: List[Dict[str, str]] = []
+    for row in new_rows:
+        updated_row = row.copy()
+        current_oi = (updated_row.get(new_oi_field) or "").strip()
+        if not current_oi:
+            row_date = _extract_row_date(updated_row)
+            old_oi = existing_oi_by_date.get(row_date, "")
+            if old_oi:
+                updated_row[new_oi_field] = old_oi
+            else:
+                updated_row.setdefault(new_oi_field, "")
+        preserved_rows.append(updated_row)
+    return preserved_rows
+
+
 def _count_rows_by_date(rows: List[Dict[str, str]]) -> Dict[str, int]:
     counts: Dict[str, int] = {}
     for row in rows:
@@ -400,6 +448,12 @@ def main() -> int:
 
         if timeframe == "1D" and valid_1h_dates:
             new_rows = _filter_rows_by_dates(new_rows, valid_1h_dates)
+        if timeframe == "1D":
+            new_rows = _preserve_1d_oi(
+                existing["fields"],
+                existing["rows"],
+                new_rows,
+            )
 
         dates_to_replace = {d for d in (_extract_row_date(row) for row in new_rows) if d}
         existing_rows = _drop_rows_for_dates(existing["rows"], dates_to_replace)

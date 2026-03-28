@@ -2,6 +2,13 @@
 
 本仓库仅保留 TradingView OHLCV 的抓取、清洗与合并流程（UTC）。
 
+## Skill 约定（本地使用）
+- 本仓库不维护仓库内 skill 文件（`skills/` 下不作为事实来源）。
+- 必须使用全局 Codex skills：
+  - `tradingview-jingscraper`
+  - `commit`
+- 全局路径：`~/.codex/skills/`
+
 ## EUA 历史OI 数据特别容易手工获取
 - Dec25   到  https://www.barchart.com/futures/quotes/CKZ25/interactive-chart
 - Dec26   到  https://www.barchart.com/futures/quotes/CKZ26/interactive-chart
@@ -66,6 +73,7 @@
     - 唯一键优先级：`datetime` > `date+time` > `date`；没有键的行会被丢弃。
     - 新旧数据各自先按唯一键去重；同键内字段遵循“非空覆盖”。
     - 合并时：以目标 CSV 字段顺序为准，字段名忽略大小写匹配；新数据非空覆盖旧值。
+    - `1D` 覆盖整日时：若同一天旧数据 `OI` 非空、且新下载行缺少/为空 `OI`，则回填并保留旧 `OI`（因 TradingView 常无 OI）。
     - 排序：按唯一键从小到大排序（优先 ISO 时间解析；解析失败则按字符串）。
   - 示例：
     ```bash
